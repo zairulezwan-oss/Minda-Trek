@@ -806,6 +806,9 @@ canvas{touch-action:none}
     <button class="btn btn-accent" onclick="startApp()" style="font-size:16px;padding:14px 40px">
       <span data-ms="Mula Sekarang" data-en="Get Started">Mula Sekarang</span> 🚀
     </button>
+    <div id="soundHint" style="margin-top:10px;font-size:11px;color:rgba(255,255,255,.65);font-weight:600;display:flex;align-items:center;gap:5px;justify-content:center">
+      🔊 <span data-ms="Ketuk skrin untuk aktifkan bunyi" data-en="Tap screen to enable sound">Ketuk skrin untuk aktifkan bunyi</span>
+    </div>
     <p style="color:rgba(255,255,255,.6);font-size:10px;margin-top:14px;font-weight:700">v2.0 · © 2025 OT HTPN</p>
     <!-- OT logo on splash -->
     <div class="splash-logo-center" onclick="showOTInfo()">
@@ -1381,7 +1384,7 @@ function goTo(id) {
   el.style.display = 'flex'; el.classList.add('active');
   const otb = document.getElementById('otBadge');
   if (otb) otb.style.display = (id==='splash'||id==='game') ? 'none' : 'flex';
-  if (id==='home') { startST(); setHomeDisplay(); updateSTUI(); if(_bgMusicOn) setTimeout(startBGMusic, 200); }
+  if (id==='home') { startST(); setHomeDisplay(); updateSTUI(); }
   if (id==='report') {
     applyLang();
     checkReportPin(() => { renderReport(); _curRptTab='summary'; switchRptTab('summary'); });
@@ -1436,10 +1439,35 @@ function saveProfile() {
 //  SOUND
 // ═══════════════════════════════════════
 let actx = null;
-function getActx() { if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); return actx; }
+let _audioUnlocked = false;
+
+function getActx() {
+  if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+  return actx;
+}
+
+function unlockAudio() {
+  try {
+    const ctx = getActx();
+    // Play a real silent buffer - required for iOS Safari
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    if (ctx.state === 'suspended') ctx.resume();
+    _audioUnlocked = true;
+  } catch(e) {}
+}
+
+// Unlock audio on first user interaction
+['touchstart','touchend','mousedown','keydown'].forEach(ev => {
+  document.addEventListener(ev, unlockAudio, { once: false, passive: true });
+});
 function playSound(type) {
   try {
-    const ctx = getActx(); if (ctx.state==='suspended') ctx.resume();
+    const ctx = getActx();
+    if (ctx.state === 'suspended') { ctx.resume(); }
     const S = { success:[[523,0],[659,.12],[784,.24]], wrong:[[300,0],[200,.15]], flip:[[440,0]],
                 match:[[523,0],[784,.12],[1047,.24]], click:[[600,0]], warning:[[400,0],[350,.12],[400,.24]],
                 trace_ok:[[784,0],[1047,.1]], trace_bad:[[250,0]] };
@@ -1479,6 +1507,14 @@ function showFb(ok, msg, cb) {
   playSound(ok ? 'match' : 'wrong');
 }
 function startApp() {
+  // Unlock audio on this first user gesture
+  unlockAudio();
+  const ctx = getActx();
+  if (ctx.state !== 'suspended') {
+    startBGMusic();
+  } else {
+    ctx.resume().then(() => startBGMusic());
+  }
   const accs = loadAccounts();
   if (accs.length > 0) {
     goTo('accounts');
@@ -3274,7 +3310,13 @@ function loginAccount(acc) {
     actSessions: acc.st?.actSessions||{memory:0,tracing:0,counting:0,matching:0,sorting:0,attention:0,adl:0,social:0,dnd:0,basic:0,tracking:0}
   });
   ST.curGame=''; ST.curLevel=1; ST.score=0;
-  saveS(); playSound('success');
+  saveS();
+  // Unlock audio on profile tap gesture
+  unlockAudio();
+  const ctx2 = getActx();
+  if (ctx2.state !== 'suspended') startBGMusic();
+  else ctx2.resume().then(() => startBGMusic());
+  playSound('success');
   goTo('home');
 }
 
@@ -3338,7 +3380,10 @@ function startBGMusic() {
   if (!_bgMusicOn) return;
   try {
     const ctx = getActx();
-    if (ctx.state === 'suspended') ctx.resume();
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(() => startBGMusic());
+      return;
+    }
     if (_bgMusicNode) { try { _bgMusicNode.stop(); } catch(e){} _bgMusicNode = null; }
 
     // Create a pleasant looping melody using oscillators
@@ -3393,9 +3438,13 @@ function stopBGMusic() {
 }
 
 function toggleBGMusic() {
+  unlockAudio();
   _bgMusicOn = !_bgMusicOn;
-  if (_bgMusicOn) startBGMusic();
-  else stopBGMusic();
+  if (_bgMusicOn) {
+    const ctx = getActx();
+    if (ctx.state !== 'suspended') startBGMusic();
+    else ctx.resume().then(() => startBGMusic());
+  } else stopBGMusic();
   const btn = document.getElementById('musicToggleBtn');
   if (btn) btn.textContent = _bgMusicOn ? '🔊' : '🔇';
   showNotif(_bgMusicOn ? t('Muzik hidup 🎵','Music on 🎵') : t('Muzik mati 🔇','Music off 🔇'));
